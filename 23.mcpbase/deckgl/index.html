@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>지하철 역 3D 기둥 지도</title>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; font-family: system-ui, "Noto Sans KR", sans-serif; background: #111; color: #eee; }
+  #panel { position: absolute; top: 16px; left: 16px; z-index: 2; width: 280px; padding: 14px 16px;
+           background: rgba(20,22,28,.88); border-radius: 10px; box-shadow: 0 2px 12px #0008; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { font-size: 12px; margin: 4px 0; color: #aab; }
+  .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  input[type=range] { flex: 1; }
+  button { background: #2a2f3a; color: #eee; border: 1px solid #445; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  .legend span { display: inline-block; width: 10px; height: 10px; margin: 0 4px 0 0; border-radius: 2px; }
+  #hour { font-variant-numeric: tabular-nums; min-width: 4.5em; text-align: right; }
+  #credit { position: absolute; bottom: 8px; left: 16px; z-index: 2; font-size: 11px; color: #99a; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <h1>지하철 역 3D 기둥 지도</h1>
+  <p>2026년 7월 한 달 합계 · 기둥 높이 = 해당 시간대 인원</p>
+  <div class="legend"><p><span style="background:#ff7a45"></span>승차 &nbsp; <span style="background:#36a3ff"></span>하차</p></div>
+  <div class="row">
+    <button id="play">▶</button>
+    <input id="slider" type="range" min="0" max="23" step="1" value="8">
+    <span id="hour"></span>
+  </div>
+</div>
+<div id="credit">데이터: 서울특별시 CardSubwayTime (공공누리 제1유형) · 역 좌표는 근사값</div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/deck.gl@9.1.0/dist.min.js"></script>
+<script>
+const { DeckGL, ColumnLayer, TextLayer } = deck;
+
+// 데이터에 좌표가 없어 근사값을 직접 넣었다.
+const COORDS = {
+  "서울역":  [126.9722, 37.5547],
+  "시청":    [126.9770, 37.5657],
+  "종각":    [126.9831, 37.5702],
+  "종로3가": [126.9921, 37.5704],
+  "종로5가": [127.0019, 37.5710],
+};
+const OFFSET = 0.0005; // 승차(서쪽)/하차(동쪽) 기둥 간격(도)
+const ON_COLOR = [255, 122, 69, 230], OFF_COLOR = [54, 163, 255, 230];
+
+let stations = [], hour = 8, timer = null, deckgl;
+const fmt = n => n.toLocaleString("ko-KR");
+const val = (s, h, kind) => s.row[`HR_${h}_GET_${kind}_NOPE`];
+
+function buildColumns() {
+  return stations.flatMap(s => [
+    { s, kind: "ON",  label: "승차", pos: [s.pos[0] - OFFSET, s.pos[1]], color: ON_COLOR },
+    { s, kind: "OFF", label: "하차", pos: [s.pos[0] + OFFSET, s.pos[1]], color: OFF_COLOR },
+  ]);
+}
+
+function render() {
+  document.getElementById("hour").textContent = `${String(hour).padStart(2, "0")}시대`;
+  document.getElementById("slider").value = hour;
+  deckgl.setProps({ layers: [
+    new ColumnLayer({
+      id: "columns",
+      data: buildColumns(),
+      diskResolution: 16,
+      radius: 38,
+      extruded: true,
+      pickable: true,
+      elevationScale: 0.006,           // 최대 약 27만 명 -> 약 1.6km
+      getPosition: d => d.pos,
+      getFillColor: d => d.color,
+      getElevation: d => val(d.s, hour, d.kind),
+      transitions: { getElevation: 400 },
+      updateTriggers: { getElevation: [hour] },
+    }),
+    new TextLayer({
+      id: "labels",
+      data: stations,
+      getPosition: d => d.pos,
+      getText: d => d.name,
+      getSize: 15,
+      getColor: [255, 255, 255, 255],
+      getPixelOffset: [0, 18],
+      background: true,
+      getBackgroundColor: [20, 22, 28, 200],
+      backgroundPadding: [4, 2],
+      characterSet: "auto",
+      fontFamily: '"Noto Sans KR", "Malgun Gothic", sans-serif',
+    }),
+  ]});
+}
+
+fetch("data/subway-hourly-202607.json")
+  .then(r => r.json())
+  .then(j => {
+    stations = j.CardSubwayTime.row
+      .filter(r => COORDS[r.STTN])
+      .map(r => ({ name: r.STTN, line: r.SBWY_ROUT_LN_NM, pos: COORDS[r.STTN], row: r }));
+
+    const q = new URLSearchParams(location.search).get("hour");
+    if (q !== null && +q >= 0 && +q <= 23) hour = +q;
+
+    deckgl = new DeckGL({
+      mapStyle: "https://tiles.openfreemap.org/styles/dark",
+      initialViewState: { longitude: 126.9875, latitude: 37.5630, zoom: 13.6, pitch: 60, bearing: -20 },
+      controller: true,
+      getTooltip: ({ object }) => object && {
+        html: `<b>${object.s.line} ${object.s.name}</b><br>${hour}시대 ${object.label}: ${fmt(val(object.s, hour, object.kind))}명`,
+        style: { background: "#14161c", color: "#eee", fontSize: "13px", borderRadius: "6px" },
+      },
+    });
+    render();
+  })
+  .catch(e => { document.getElementById("panel").insertAdjacentHTML("beforeend", `<p>데이터 로드 실패: ${e.message}</p>`); });
+
+document.getElementById("slider").addEventListener("input", e => { hour = +e.target.value; render(); });
+document.getElementById("play").addEventListener("click", e => {
+  if (timer) { clearInterval(timer); timer = null; e.target.textContent = "▶"; return; }
+  e.target.textContent = "⏸";
+  timer = setInterval(() => { hour = (hour + 1) % 24; render(); }, 900);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>자기소개</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --text: #222831;
+      --muted: #6b7280;
+      --accent: #4f46e5;
+    }
+    /* 어두운 테마 색상 */
+    :root[data-theme="dark"] {
+      --bg: #111318;
+      --card: #1c1f26;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #818cf8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 40px 16px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Pretendard", "Malgun Gothic", sans-serif;
+      line-height: 1.7;
+      transition: background 0.3s, color 0.3s;
+    }
+    .card {
+      position: relative;
+      max-width: 640px;
+      margin: 0 auto;
+      background: var(--card);
+      border-radius: 16px;
+      padding: 40px 32px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+      transition: background 0.3s;
+    }
+    .theme-btn {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      padding: 8px 14px;
+      border: 1px solid var(--accent);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--accent);
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .theme-btn:hover { background: rgba(127, 127, 127, 0.12); }
+    .avatar {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 3px solid var(--accent);
+      margin-bottom: 16px;
+      display: block;
+    }
+    h1 { margin: 0; font-size: 28px; }
+    .role { color: var(--muted); margin: 4px 0 24px; }
+    h2 {
+      font-size: 18px;
+      color: var(--accent);
+      border-bottom: 1px solid rgba(127, 127, 127, 0.2);
+      padding-bottom: 6px;
+      margin-top: 28px;
+    }
+    ul { padding-left: 20px; margin: 8px 0; }
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tag {
+      background: rgba(79, 70, 229, 0.12);
+      color: var(--accent);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 14px;
+    }
+    a { color: var(--accent); }
+    footer { text-align: center; color: var(--muted); font-size: 13px; margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <button class="theme-btn" id="themeBtn" type="button">🌙 어둡게</button>
+    <img class="avatar" src="ChatGPTDog.png" alt="프로필 사진 (강아지)">
+    <h1>홍길동</h1>
+    <p class="role">소프트웨어 개발자</p>
+
+    <h2>소개</h2>
+    <p>안녕하세요! 새로운 기술을 배우고 직접 만들어 보는 것을 좋아하는 개발자입니다.
+      요즘은 Claude Code로 더 빠르고 즐겁게 개발하는 방법을 공부하고 있어요.</p>
+
+    <h2>관심 분야</h2>
+    <div class="tags">
+      <span class="tag">웹 개발</span>
+      <span class="tag">AI 도구 활용</span>
+      <span class="tag">데이터베이스</span>
+      <span class="tag">자동화</span>
+    </div>
+
+    <h2>좋아하는 것</h2>
+    <ul>
+      <li>커피 한 잔과 함께하는 코딩</li>
+      <li>산책과 여행</li>
+      <li>책 읽기</li>
+    </ul>
+
+    <h2>연락처</h2>
+    <p>이메일: <a href="mailto:fireflower@smtcube.net">fireflower@smtcube.net</a></p>
+  </main>
+  <footer>
+    <p>제작 시간: 2026년 10월 29일 10:29</p>
+    <p>© 2026 홍길동</p>
+  </footer>
+
+  <script>
+    // 버튼을 누를 때마다 밝은/어두운 테마를 번갈아 바꾼다
+    const btn = document.getElementById('themeBtn');
+    btn.addEventListener('click', () => {
+      const isDark = document.documentElement.dataset.theme === 'dark';
+      document.documentElement.dataset.theme = isDark ? 'light' : 'dark';
+      btn.textContent = isDark ? '🌙 어둡게' : '☀️ 밝게';
+    });
+  </script>
+</body>
+</html>

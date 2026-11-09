@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서울 라이브 3D</title>
+<style>
+  :root {
+    --surface: #10131a;
+    --card: #181c25;
+    --text-primary: #e8e6df;
+    --text-secondary: #a9a79f;
+    --grid: #2a2f3a;
+    --on: #3987e5;
+    --off: #d95926;
+  }
+  body { font-family: system-ui, sans-serif; background: var(--surface); color: var(--text-primary); margin: 40px; }
+  h1 { font-size: 28px; }
+  table { border-collapse: collapse; margin-top: 16px; }
+  td, th { border: 1px solid #333; padding: 6px 12px; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .legend { display: flex; gap: 20px; margin: 24px 0 12px; color: var(--text-secondary); font-size: 14px; }
+  .legend span::before { content: ""; display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; background: var(--c); }
+  .charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border-radius: 8px; padding: 14px 14px 8px; position: relative; }
+  .card h2 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card text { fill: var(--text-secondary); font-size: 11px; }
+  .tip { position: absolute; pointer-events: none; background: #0b0d12; border: 1px solid var(--grid); border-radius: 6px; padding: 6px 10px; font-size: 13px; white-space: nowrap; display: none; z-index: 2; }
+  .tip b { display: block; margin-bottom: 2px; }
+  .tip i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+  .scene { position: relative; height: 460px; background: var(--card); border-radius: 8px; overflow: hidden; }
+  .scene canvas { display: block; }
+  .scene .label { color: var(--text-primary); font-size: 13px; font-weight: 600; text-shadow: 0 1px 3px #000; pointer-events: none; }
+  .controls { display: flex; align-items: center; gap: 12px; margin: 12px 0 8px; }
+  .controls input { flex: 1; accent-color: var(--on); }
+  .controls button { background: var(--card); color: var(--text-primary); border: 1px solid var(--grid); border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 14px; }
+  #hourText { min-width: 56px; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .hint { color: var(--text-secondary); font-size: 13px; margin: 0 0 8px; }
+  @media (max-width: 520px) { body { margin: 16px; } .charts { grid-template-columns: 1fr; } .scene { height: 320px; } }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<h1>서울 라이브 3D</h1>
+<p>2026년 7월 한 달 동안 역별 시간대별 승하차 인원 (합계)</p>
+<div class="legend"><span style="--c: var(--on)">승차</span><span style="--c: var(--off)">하차</span></div>
+<div class="scene" id="scene"><div class="tip" id="sceneTip"></div></div>
+<div class="controls">
+  <button id="play" type="button">▶ 재생</button>
+  <span id="hourText">04시</span>
+  <input type="range" id="hour" min="0" max="23" step="1" value="0" aria-label="시간대">
+</div>
+<p class="hint">드래그로 돌리기 · 휠로 확대 · 기둥에 마우스를 올리면 인원이 보입니다. 기둥 높이는 모든 역·시간대가 같은 기준입니다.</p>
+<div class="legend"><span style="--c: var(--on)">승차</span><span style="--c: var(--off)">하차</span></div>
+<div class="charts" id="charts"></div>
+<table id="t"><tr><th>호선</th><th>역</th><th>승차</th><th>하차</th></tr></table>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+
+// 하루 운행 순서대로 04시부터 다음 날 03시까지
+const HOURS = Array.from({ length: 24 }, (_, i) => (i + 4) % 24);
+const W = 480, H = 220, PAD = { l: 52, r: 12, t: 10, b: 26 };
+
+// 축 최대값을 보기 좋은 단위로 올림
+function niceMax(v) {
+  const step = 10 ** Math.floor(Math.log10(v));
+  return Math.ceil(v / step) * step;
+}
+
+// 역 하나의 승하차 꺾은선 그래프 카드를 만든다
+function drawStation(row) {
+  const on = HOURS.map((h) => row[`HR_${h}_GET_ON_NOPE`]);
+  const off = HOURS.map((h) => row[`HR_${h}_GET_OFF_NOPE`]);
+  const max = niceMax(Math.max(...on, ...off));
+  const x = (i) => PAD.l + (i * (W - PAD.l - PAD.r)) / (HOURS.length - 1);
+  const y = (v) => H - PAD.b - (v / max) * (H - PAD.t - PAD.b);
+  const path = (vals) => vals.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+
+  let grid = "";
+  for (let k = 0; k <= 4; k++) {
+    const v = (max / 4) * k;
+    grid += `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/>`;
+    grid += `<text x="${PAD.l - 6}" y="${y(v) + 4}" text-anchor="end">${v.toLocaleString()}</text>`;
+  }
+  HOURS.forEach((h, i) => {
+    if (i % 3 === 0) grid += `<text x="${x(i)}" y="${H - 8}" text-anchor="middle">${String(h).padStart(2, "0")}시</text>`;
+  });
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `
+    <h2>${row.SBWY_ROUT_LN_NM} ${row.STTN}</h2>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${row.STTN} 시간대별 승하차 인원">
+      ${grid}
+      <line class="cross" y1="${PAD.t}" y2="${H - PAD.b}" stroke="var(--text-secondary)" stroke-width="1" visibility="hidden"/>
+      <path d="${path(on)}" fill="none" stroke="var(--on)" stroke-width="2" stroke-linejoin="round"/>
+      <path d="${path(off)}" fill="none" stroke="var(--off)" stroke-width="2" stroke-linejoin="round"/>
+      <circle class="dot-on" r="4" fill="var(--on)" stroke="var(--card)" stroke-width="2" visibility="hidden"/>
+      <circle class="dot-off" r="4" fill="var(--off)" stroke="var(--card)" stroke-width="2" visibility="hidden"/>
+      <rect x="${PAD.l}" y="${PAD.t}" width="${W - PAD.l - PAD.r}" height="${H - PAD.t - PAD.b}" fill="transparent"/>
+    </svg>
+    <div class="tip"></div>`;
+
+  // 마우스를 올린 시간대의 승하차 인원을 툴팁으로 보여준다
+  const svg = card.querySelector("svg"), tip = card.querySelector(".tip");
+  const cross = svg.querySelector(".cross"), dOn = svg.querySelector(".dot-on"), dOff = svg.querySelector(".dot-off");
+  svg.addEventListener("mousemove", (e) => {
+    const p = svg.createSVGPoint();
+    p.x = e.clientX; p.y = e.clientY;
+    const sx = p.matrixTransform(svg.getScreenCTM().inverse()).x;
+    const i = Math.max(0, Math.min(HOURS.length - 1, Math.round(((sx - PAD.l) / (W - PAD.l - PAD.r)) * (HOURS.length - 1))));
+    cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i));
+    dOn.setAttribute("cx", x(i)); dOn.setAttribute("cy", y(on[i]));
+    dOff.setAttribute("cx", x(i)); dOff.setAttribute("cy", y(off[i]));
+    [cross, dOn, dOff].forEach((el) => el.setAttribute("visibility", "visible"));
+    const h = String(HOURS[i]).padStart(2, "0");
+    tip.innerHTML = `<b>${h}시대</b><i style="background:var(--on)"></i>승차 ${on[i].toLocaleString()}명<br><i style="background:var(--off)"></i>하차 ${off[i].toLocaleString()}명`;
+    tip.style.display = "block";
+    const box = card.getBoundingClientRect();
+    const left = e.clientX - box.left + 14;
+    tip.style.left = (left + tip.offsetWidth > box.width ? left - tip.offsetWidth - 28 : left) + "px";
+    tip.style.top = (e.clientY - box.top + 14) + "px";
+  });
+  svg.addEventListener("mouseleave", () => {
+    [cross, dOn, dOff].forEach((el) => el.setAttribute("visibility", "hidden"));
+    tip.style.display = "none";
+  });
+  document.getElementById("charts").append(card);
+}
+
+// 데이터에 좌표가 없어 역 위치(위도, 경도)는 근사값으로 둔다
+const STATION_COORDS = {
+  "서울역": [37.5547, 126.9707],
+  "시청": [37.5657, 126.9772],
+  "종각": [37.5702, 126.9831],
+  "종로3가": [37.5715, 126.9917],
+  "종로5가": [37.5709, 127.0019],
+};
+const UNIT_M = 100, MAX_H = 12;
+const hh = (h) => String(h).padStart(2, "0");
+
+// 역마다 승차·하차 기둥을 세우고 슬라이더 시간대에 맞춰 높이를 바꾼다
+function drawScene(rows) {
+  const box = document.getElementById("scene"), tip = document.getElementById("sceneTip");
+  const css = getComputedStyle(document.documentElement);
+  const color = (name) => new THREE.Color(css.getPropertyValue(name).trim());
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(40, box.clientWidth / box.clientHeight, 0.1, 500);
+  camera.position.set(0, 26, 34);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(box.clientWidth, box.clientHeight);
+  box.prepend(renderer.domElement);
+  const labels = new CSS2DRenderer();
+  labels.setSize(box.clientWidth, box.clientHeight);
+  Object.assign(labels.domElement.style, { position: "absolute", top: "0", pointerEvents: "none" });
+  box.append(labels.domElement);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 3, 0);
+  controls.enableDamping = true;
+  controls.maxPolarAngle = Math.PI / 2.1;
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+  sun.position.set(10, 30, 20);
+  scene.add(sun);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(44, 44), new THREE.MeshStandardMaterial({ color: color("--grid") }));
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+  const gridLines = new THREE.GridHelper(44, 22, 0x3a4050, 0x3a4050);
+  gridLines.position.y = 0.01;
+  scene.add(gridLines);
+
+  // 평균 위치를 원점으로 위경도를 미터 평면 좌표로 바꾼다
+  const placed = rows.filter((r) => STATION_COORDS[r.STTN]);
+  const lat0 = placed.reduce((a, r) => a + STATION_COORDS[r.STTN][0], 0) / placed.length;
+  const lon0 = placed.reduce((a, r) => a + STATION_COORDS[r.STTN][1], 0) / placed.length;
+  const project = ([lat, lon]) => new THREE.Vector3(
+    ((lon - lon0) * Math.cos((lat0 * Math.PI) / 180) * 111320) / UNIT_M, 0, (-(lat - lat0) * 110540) / UNIT_M);
+
+  const max = Math.max(...placed.flatMap((r) => HOURS.flatMap((h) => [r[`HR_${h}_GET_ON_NOPE`], r[`HR_${h}_GET_OFF_NOPE`]])));
+  const geo = new THREE.BoxGeometry(0.9, 1, 0.9).translate(0, 0.5, 0);
+  const pillars = [];
+  for (const r of placed) {
+    const p = project(STATION_COORDS[r.STTN]);
+    for (const [kind, dx, name] of [["ON", -0.5, "--on"], ["OFF", 0.5, "--off"]]) {
+      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: color(name), roughness: 0.6 }));
+      mesh.position.set(p.x + dx, 0, p.z);
+      mesh.scale.y = 0.01;
+      mesh.userData = { row: r, kind, target: 0.01 };
+      scene.add(mesh);
+      pillars.push(mesh);
+    }
+    const el = Object.assign(document.createElement("div"), { className: "label", textContent: r.STTN });
+    const label = new CSS2DObject(el);
+    label.position.set(p.x, 1, p.z);
+    scene.add(label);
+    r._label = label;
+  }
+
+  const slider = document.getElementById("hour"), hourText = document.getElementById("hourText");
+  // 슬라이더 위치(0~23)에 맞춰 기둥 목표 높이를 정한다
+  function setHour(i) {
+    const h = HOURS[i];
+    hourText.textContent = `${hh(h)}시`;
+    for (const m of pillars) m.userData.target = Math.max(0.01, (m.userData.row[`HR_${h}_${m.userData.kind === "ON" ? "GET_ON" : "GET_OFF"}_NOPE`] / max) * MAX_H);
+  }
+  slider.addEventListener("input", () => setHour(+slider.value));
+
+  // 재생 버튼은 1초마다 한 시간씩 넘긴다
+  const play = document.getElementById("play");
+  let timer = null;
+  play.addEventListener("click", () => {
+    if (timer) { clearInterval(timer); timer = null; play.textContent = "▶ 재생"; return; }
+    play.textContent = "❚❚ 멈춤";
+    timer = setInterval(() => { slider.value = (+slider.value + 1) % 24; setHour(+slider.value); }, 1000);
+  });
+
+  // 기둥에 마우스를 올리면 그 역·시간대 인원을 보여준다
+  const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+  renderer.domElement.addEventListener("mousemove", (e) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    ray.setFromCamera(mouse, camera);
+    const hit = ray.intersectObjects(pillars)[0];
+    if (!hit) { tip.style.display = "none"; return; }
+    const { row } = hit.object.userData, h = HOURS[+slider.value];
+    tip.innerHTML = `<b>${row.STTN} · ${hh(h)}시대</b><i style="background:var(--on)"></i>승차 ${row[`HR_${h}_GET_ON_NOPE`].toLocaleString()}명<br><i style="background:var(--off)"></i>하차 ${row[`HR_${h}_GET_OFF_NOPE`].toLocaleString()}명`;
+    tip.style.display = "block";
+    const left = e.clientX - rect.left + 14;
+    tip.style.left = (left + tip.offsetWidth > rect.width ? left - tip.offsetWidth - 28 : left) + "px";
+    tip.style.top = (e.clientY - rect.top + 14) + "px";
+  });
+  renderer.domElement.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+
+  window.addEventListener("resize", () => {
+    camera.aspect = box.clientWidth / box.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(box.clientWidth, box.clientHeight);
+    labels.setSize(box.clientWidth, box.clientHeight);
+  });
+
+  // 매 프레임 기둥 높이를 목표값으로 조금씩 옮긴다
+  renderer.setAnimationLoop(() => {
+    for (const m of pillars) m.scale.y += (m.userData.target - m.scale.y) * 0.15;
+    for (const r of placed) {
+      const top = Math.max(...pillars.filter((m) => m.userData.row === r).map((m) => m.scale.y));
+      r._label.position.y = top + 0.8;
+    }
+    controls.update();
+    renderer.render(scene, camera);
+    labels.render(scene, camera);
+  });
+
+  // 주소에 ?hour=8 처럼 붙이면 그 시간대로 시작한다
+  const start = new URLSearchParams(location.search).get("hour");
+  slider.value = Math.max(0, start === null ? 0 : HOURS.indexOf(+start));
+  setHour(+slider.value);
+}
+
+fetch("data/subway-hourly-202607.json")
+  .then((r) => r.json())
+  .then((d) => {
+    drawScene(d.CardSubwayTime.row);
+    for (const row of d.CardSubwayTime.row) {
+      drawStation(row);
+      let on = 0, off = 0;
+      for (let h = 0; h < 24; h++) {
+        on += row[`HR_${h}_GET_ON_NOPE`];
+        off += row[`HR_${h}_GET_OFF_NOPE`];
+      }
+      document.getElementById("t").insertAdjacentHTML("beforeend",
+        `<tr><td>${row.SBWY_ROUT_LN_NM}</td><td>${row.STTN}</td><td class="num">${on.toLocaleString()}</td><td class="num">${off.toLocaleString()}</td></tr>`);
+    }
+  });
+</script>
+</body>
+</html>

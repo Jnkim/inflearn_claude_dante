@@ -1,0 +1,10 @@
+{
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "context7",
+    "playwright"
+  ],
+  "disabledMcpjsonServers": [
+    "claude-code-docs"
+  ]
+}
